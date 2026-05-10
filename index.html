@@ -1,0 +1,521 @@
+<!doctype html>
+<!--
+modpack index generator
+static-hosting ready: upload this file as index.html to github pages, netlify, cloudflare pages, vercel, etc.
+
+notes:
+- modrinth link loading uses https://api.modrinth.com from the browser.
+- .mrpack/.zip upload parsing uses jszip from jsdelivr.
+- raw list mode works without any backend.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>modpack index generator</title>
+<meta name="description" content="Generate a searchable, categorized Minecraft modpack index from a Modrinth link, .mrpack file, CurseForge manifest, or raw mod list." />
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+:root{
+  --bg:#07100d;--bg2:#0b1712;--panel:rgba(15,27,23,.78);--panel2:rgba(20,36,30,.92);
+  --header1:rgba(18,35,28,.94);--header2:rgba(10,16,14,.75);--text:#effbf2;--muted:#a9baaf;
+  --line:rgba(255,255,255,.11);--accent:#1bd96a;--accent-soft:rgba(27,217,106,.15);
+  --alt-soft:rgba(124,255,203,.12);--wave-a:27,217,106;--wave-b:124,255,203;
+  --shadow:0 20px 70px rgba(0,0,0,.38);
+}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text);background:radial-gradient(circle at top,var(--bg2) 0%,var(--bg) 56%,#040705 100%);padding:36px 18px 60px;overflow-x:hidden;isolation:isolate}
+body::before,body::after,.gradient-orbs{content:"";position:fixed;inset:0;pointer-events:none;z-index:-4}
+body::before{z-index:-4;background:radial-gradient(circle at 18% 22%,rgba(var(--wave-a),.08),transparent 0 24%),radial-gradient(circle at 82% 16%,rgba(var(--wave-b),.07),transparent 0 20%),radial-gradient(circle at 56% 84%,rgba(255,255,255,.025),transparent 0 18%);filter:blur(18px)}
+body::after{z-index:-3;background:linear-gradient(180deg,rgba(4,8,6,.16),rgba(4,8,6,.46))}
+.gradient-orbs{z-index:-3;opacity:.58;filter:blur(30px);background:
+  radial-gradient(circle at var(--orb1x,18%) var(--orb1y,24%),rgba(var(--wave-a),.18),transparent 0 22%),
+  radial-gradient(circle at var(--orb2x,78%) var(--orb2y,28%),rgba(var(--wave-b),.16),transparent 0 24%),
+  radial-gradient(circle at var(--orb3x,54%) var(--orb3y,82%),rgba(255,255,255,.045),transparent 0 18%);
+  animation:orbFloat 16s ease-in-out infinite alternate}
+@keyframes orbFloat{
+  0%{--orb1x:14%;--orb1y:22%;--orb2x:84%;--orb2y:18%;--orb3x:50%;--orb3y:86%;opacity:.42}
+  50%{--orb1x:28%;--orb1y:34%;--orb2x:70%;--orb2y:42%;--orb3x:62%;--orb3y:72%;opacity:.62}
+  100%{--orb1x:20%;--orb1y:68%;--orb2x:88%;--orb2y:56%;--orb3x:38%;--orb3y:80%;opacity:.48}
+}
+body.animated-theme .gradient-orbs{background-size:420% 420%;animation:themeDrift 10s ease infinite;opacity:.52}
+body.animated-theme header{background-size:360% 360%;animation:themeDrift 12s ease infinite}
+body.animated-theme .btn.primary,body.animated-theme .chip.active,body.animated-theme .btn:hover,body.animated-theme .chip:hover{background-size:320% 320%;animation:themeDrift 8s ease infinite}
+body.rainbow-mode .gradient-orbs{background:linear-gradient(120deg,rgba(255,77,109,.18),rgba(255,159,28,.16),rgba(255,228,94,.14),rgba(27,217,106,.15),rgba(34,230,255,.16),rgba(184,137,255,.18))}
+body.rainbow-mode header{background:linear-gradient(135deg,rgba(255,77,109,.18),rgba(255,159,28,.14),rgba(27,217,106,.13),rgba(34,230,255,.14),rgba(184,137,255,.18)),linear-gradient(145deg,var(--header1),var(--header2))}
+body.rainbow-mode .btn.primary,body.rainbow-mode .chip.active,body.rainbow-mode .btn:hover,body.rainbow-mode .chip:hover{background:linear-gradient(90deg,rgba(255,77,109,.16),rgba(255,159,28,.14),rgba(255,228,94,.12),rgba(27,217,106,.13),rgba(34,230,255,.14),rgba(184,137,255,.16))}
+body.aurora-mode .gradient-orbs{background:linear-gradient(120deg,rgba(124,255,203,.18),rgba(34,230,255,.16),rgba(184,137,255,.18),rgba(124,255,203,.12))}
+body.aurora-mode header{background:linear-gradient(135deg,rgba(124,255,203,.14),rgba(34,230,255,.14),rgba(184,137,255,.16)),linear-gradient(145deg,var(--header1),var(--header2))}
+body.aurora-mode .btn.primary,body.aurora-mode .chip.active,body.aurora-mode .btn:hover,body.aurora-mode .chip:hover{background:linear-gradient(90deg,rgba(124,255,203,.16),rgba(34,230,255,.14),rgba(184,137,255,.16))}
+body.sunset-mode .gradient-orbs{background:linear-gradient(120deg,rgba(255,77,109,.18),rgba(255,159,28,.17),rgba(255,228,94,.13),rgba(255,77,109,.12))}
+body.sunset-mode header{background:linear-gradient(135deg,rgba(255,77,109,.16),rgba(255,159,28,.14),rgba(255,228,94,.10)),linear-gradient(145deg,var(--header1),var(--header2))}
+body.sunset-mode .btn.primary,body.sunset-mode .chip.active,body.sunset-mode .btn:hover,body.sunset-mode .chip:hover{background:linear-gradient(90deg,rgba(255,77,109,.16),rgba(255,159,28,.15),rgba(255,228,94,.12))}
+body.ocean-mode .gradient-orbs{background:linear-gradient(120deg,rgba(6,16,19,.20),rgba(34,230,255,.16),rgba(98,159,255,.18),rgba(124,255,203,.12))}
+body.ocean-mode header{background:linear-gradient(135deg,rgba(34,230,255,.14),rgba(98,159,255,.16),rgba(124,255,203,.10)),linear-gradient(145deg,var(--header1),var(--header2))}
+body.ocean-mode .btn.primary,body.ocean-mode .chip.active,body.ocean-mode .btn:hover,body.ocean-mode .chip:hover{background:linear-gradient(90deg,rgba(34,230,255,.16),rgba(98,159,255,.16),rgba(124,255,203,.12))}
+body.plasma-mode .gradient-orbs{background:linear-gradient(120deg,rgba(255,77,109,.17),rgba(184,137,255,.19),rgba(34,230,255,.16),rgba(255,105,180,.14))}
+body.plasma-mode header{background:linear-gradient(135deg,rgba(255,77,109,.14),rgba(184,137,255,.18),rgba(34,230,255,.12)),linear-gradient(145deg,var(--header1),var(--header2))}
+body.plasma-mode .btn.primary,body.plasma-mode .chip.active,body.plasma-mode .btn:hover,body.plasma-mode .chip:hover{background:linear-gradient(90deg,rgba(255,77,109,.15),rgba(184,137,255,.17),rgba(34,230,255,.14))}
+@keyframes themeDrift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+#bg{position:fixed;inset:0;width:100%;height:100%;z-index:-2;pointer-events:none;opacity:.38;filter:drop-shadow(0 0 22px rgba(var(--wave-a),.07))}
+.wrap{width:min(1180px,100%);margin:0 auto;position:relative;z-index:1}
+header{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:30px;padding:34px;background:linear-gradient(145deg,var(--header1),var(--header2));box-shadow:var(--shadow)}
+
+.eyebrow{display:inline-flex;align-items:center;margin-bottom:14px;color:var(--accent);font-size:12px;font-weight:850;letter-spacing:.08em;text-transform:uppercase}
+
+h1{margin:0;font-size:clamp(38px,8vw,86px);line-height:.88;letter-spacing:-.075em}
+.subtitle{margin:18px 0 0;max-width:850px;color:var(--muted);font-size:17px;line-height:1.6}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:28px;max-width:880px}
+.stat{border:1px solid var(--line);border-radius:20px;padding:16px;background:rgba(255,255,255,.045);backdrop-filter:blur(16px)}
+.stat strong{display:block;font-size:30px;line-height:1}
+.stat span{display:block;margin-top:8px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+.panel{margin-top:22px;border:1px solid var(--line);border-radius:26px;background:rgba(255,255,255,.035);padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.18)}
+.panel h2{margin:0 0 10px;font-size:24px;letter-spacing:-.035em}
+.panel p{margin:0;color:var(--muted);line-height:1.55}
+.source-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:14px}
+.box{border:1px solid var(--line);border-radius:22px;background:var(--panel);padding:16px}
+.box h3{margin:0 0 10px;font-size:16px}
+.box small{display:block;color:var(--muted);line-height:1.45;margin-top:8px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+input,textarea,button{font:inherit}
+.input,textarea{width:100%;border:1px solid var(--line);outline:none;background:rgba(0,0,0,.18);color:var(--text);border-radius:16px;padding:12px 13px}
+textarea{min-height:148px;resize:vertical;line-height:1.45}
+input::placeholder,textarea::placeholder{color:#809085}
+.file-drop{display:grid;place-items:center;text-align:center;min-height:144px;border:1px dashed rgba(255,255,255,.18);border-radius:18px;background:rgba(255,255,255,.035);padding:16px;transition:.18s ease;cursor:pointer}
+.file-drop:hover,.file-drop.dragover{border-color:rgba(var(--wave-a),.55);background:var(--accent-soft);transform:translateY(-1px)}
+.file-drop strong{display:block;margin-bottom:6px}.file-drop span{color:var(--muted);font-size:13px}.file-drop input{display:none}
+.btn{border:1px solid var(--line);color:var(--text);background:rgba(255,255,255,.055);border-radius:999px;padding:10px 13px;font-weight:780;cursor:pointer;transition:.18s ease}
+.btn:hover,.btn.primary,.btn.active{border-color:rgba(var(--wave-a),.6);background:var(--accent-soft);transform:translateY(-1px)}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.statusbar{margin-top:12px;color:var(--muted);font-size:13px;line-height:1.45;white-space:pre-line}
+.toolbar{margin:22px 0;display:grid;gap:14px}
+.searchbox{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:22px;background:var(--panel);padding:14px 16px;box-shadow:0 10px 40px rgba(0,0,0,.18)}
+.searchbox span{color:var(--accent);font-weight:900}
+.filters{display:flex;flex-wrap:wrap;gap:9px}
+.chip{border:1px solid var(--line);color:var(--text);background:rgba(255,255,255,.055);border-radius:999px;padding:10px 13px;font-weight:780;cursor:pointer;transition:.18s ease;text-transform:capitalize}
+.chip span{margin-left:6px;color:var(--muted);font-size:12px}.chip:hover,.chip.active{border-color:rgba(var(--wave-a),.6);background:var(--accent-soft);transform:translateY(-1px)}
+.sections{display:grid;gap:22px}
+.category-section{border:1px solid var(--line);border-radius:26px;background:rgba(255,255,255,.035);padding:16px;box-shadow:0 10px 40px rgba(0,0,0,.18)}
+.section-head{display:flex;align-items:end;justify-content:space-between;gap:14px;padding:4px 4px 15px}
+.section-head h2{margin:0;font-size:24px;letter-spacing:-.035em;text-transform:capitalize}.section-head p{margin:0;color:var(--muted);font-size:13px;font-weight:750}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.mod-card{border:1px solid var(--line);border-radius:18px;background:var(--panel);overflow:hidden;transition:transform .16s ease,border-color .16s ease,background .16s ease}
+.mod-card:hover{transform:translateY(-2px);border-color:rgba(var(--wave-a),.38);background:var(--panel2)}
+.mod-card a,.mod-card .no-link{min-height:112px;display:flex;flex-direction:column;justify-content:space-between;gap:15px;padding:15px;color:inherit;text-decoration:none}
+.mod-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.category-pill,.status{display:inline-flex;align-items:center;flex:0 0 auto;border-radius:999px;padding:5px 8px;font-size:11px;font-weight:850;line-height:1;text-transform:uppercase;letter-spacing:.055em;white-space:nowrap}
+.category-pill{width:max-content;max-width:100%;color:#bfeacd;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08)}
+.status.direct{color:#baffd1;background:var(--accent-soft);border:1px solid rgba(var(--wave-a),.26)}
+.status.search{color:#cfe0ff;background:var(--alt-soft);border:1px solid rgba(var(--wave-b),.24)}
+.status.local{color:#fff0c7;background:rgba(255,209,102,.13);border:1px solid rgba(255,209,102,.22)}
+.mod-card h2{margin:0;font-size:18px;line-height:1.15;letter-spacing:-.025em}.mod-card small{display:block;margin-top:8px;color:var(--muted);font-size:12px}
+.empty{display:none;border:1px dashed var(--line);border-radius:24px;padding:28px;color:var(--muted);text-align:center;background:rgba(255,255,255,.035)}
+.theme-panel{position:fixed;right:18px;bottom:18px;z-index:20;font-size:14px}.theme-toggle{width:46px;height:46px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--text);box-shadow:0 12px 38px rgba(0,0,0,.35);backdrop-filter:blur(16px);cursor:pointer;font-size:20px;font-weight:900}
+.theme-drawer{position:absolute;right:0;bottom:58px;width:288px;border:1px solid var(--line);border-radius:22px;background:rgba(10,16,14,.86);box-shadow:0 20px 70px rgba(0,0,0,.45);backdrop-filter:blur(18px);padding:14px;opacity:0;transform:translateY(10px) scale(.97);pointer-events:none;transition:.18s ease}.theme-panel.open .theme-drawer{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
+.theme-drawer h3{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}.theme-subhead{margin-top:14px!important}.theme-options{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}.animated-theme-options{grid-template-columns:repeat(5,1fr)}
+.theme-swatch{height:36px;border-radius:14px;border:1px solid rgba(255,255,255,.14);cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);transition:.15s ease}.theme-swatch:hover,.theme-swatch.active{transform:translateY(-1px);border-color:rgba(255,255,255,.55)}
+.theme-swatch[data-theme="red"]{background:linear-gradient(135deg,#ff4d6d,#ff8a3d)}.theme-swatch[data-theme="orange"]{background:linear-gradient(135deg,#ff8a1f,#ffd166)}.theme-swatch[data-theme="yellow"]{background:linear-gradient(135deg,#ffe45e,#b8f35b)}.theme-swatch[data-theme="green"]{background:linear-gradient(135deg,#1bd96a,#7cffcb)}.theme-swatch[data-theme="blue"]{background:linear-gradient(135deg,#22e6ff,#629fff)}.theme-swatch[data-theme="purple"]{background:linear-gradient(135deg,#a875ff,#ff69b4)}.theme-swatch[data-theme="rainbow"]{background:linear-gradient(135deg,#ff4d6d,#ff9f1c,#ffe45e,#1bd96a,#22e6ff,#b889ff)}.theme-swatch[data-theme="aurora"]{background:linear-gradient(135deg,#7cffcb,#22e6ff,#b889ff)}.theme-swatch[data-theme="sunset"]{background:linear-gradient(135deg,#ff4d6d,#ff9f1c,#ffe45e)}.theme-swatch[data-theme="ocean"]{background:linear-gradient(135deg,#061013,#22e6ff,#629fff)}.theme-swatch[data-theme="plasma"]{background:linear-gradient(135deg,#ff4d6d,#b889ff,#22e6ff)}.animated-theme-options .theme-swatch{background-size:240% 240%;animation:swatchDrift 3.6s ease-in-out infinite alternate}@keyframes swatchDrift{0%{background-position:0% 50%}100%{background-position:100% 50%}}
+footer{margin-top:26px;color:var(--muted);font-size:13px;text-align:center}
+
+
+/* animated themes: color morph only, no page movement */
+body.animated-theme .gradient-orbs{
+  opacity:.62;
+  filter:blur(34px) saturate(1.35);
+  transform:none;
+  animation:colorFieldShift 12s ease-in-out infinite;
+}
+body.animated-theme header{
+  animation:headerColorShift 14s ease-in-out infinite;
+}
+body.animated-theme .btn.primary,
+body.animated-theme .chip.active,
+body.animated-theme .btn:hover,
+body.animated-theme .chip:hover{
+  animation:controlColorShift 9s ease-in-out infinite;
+}
+body.animated-theme #bg{
+  animation:waveColorShift 10s ease-in-out infinite;
+}
+
+body.rainbow-mode .gradient-orbs{
+  background:
+    radial-gradient(circle at 18% 22%,rgba(255,77,109,.20),transparent 0 25%),
+    radial-gradient(circle at 82% 20%,rgba(255,228,94,.16),transparent 0 24%),
+    radial-gradient(circle at 52% 82%,rgba(34,230,255,.18),transparent 0 22%),
+    linear-gradient(120deg,rgba(255,77,109,.12),rgba(255,159,28,.12),rgba(255,228,94,.10),rgba(27,217,106,.11),rgba(34,230,255,.12),rgba(184,137,255,.14));
+  background-size:260% 260%;
+}
+body.rainbow-mode header{
+  background:
+    linear-gradient(135deg,rgba(255,77,109,.18),rgba(255,159,28,.14),rgba(255,228,94,.10),rgba(27,217,106,.12),rgba(34,230,255,.14),rgba(184,137,255,.18)),
+    linear-gradient(145deg,var(--header1),var(--header2));
+  background-size:280% 280%;
+}
+body.rainbow-mode .btn.primary,
+body.rainbow-mode .chip.active,
+body.rainbow-mode .btn:hover,
+body.rainbow-mode .chip:hover{
+  background:linear-gradient(90deg,rgba(255,77,109,.16),rgba(255,159,28,.14),rgba(255,228,94,.12),rgba(27,217,106,.13),rgba(34,230,255,.14),rgba(184,137,255,.16));
+  background-size:260% 260%;
+}
+
+body.aurora-mode .gradient-orbs{
+  background:
+    radial-gradient(circle at 18% 22%,rgba(124,255,203,.20),transparent 0 25%),
+    radial-gradient(circle at 82% 20%,rgba(34,230,255,.17),transparent 0 24%),
+    radial-gradient(circle at 52% 82%,rgba(184,137,255,.18),transparent 0 22%),
+    linear-gradient(120deg,rgba(124,255,203,.13),rgba(34,230,255,.13),rgba(184,137,255,.16),rgba(124,255,203,.10));
+  background-size:260% 260%;
+}
+body.aurora-mode header{
+  background:linear-gradient(135deg,rgba(124,255,203,.15),rgba(34,230,255,.14),rgba(184,137,255,.17),rgba(124,255,203,.11)),linear-gradient(145deg,var(--header1),var(--header2));
+  background-size:280% 280%;
+}
+body.aurora-mode .btn.primary,
+body.aurora-mode .chip.active,
+body.aurora-mode .btn:hover,
+body.aurora-mode .chip:hover{
+  background:linear-gradient(90deg,rgba(124,255,203,.16),rgba(34,230,255,.14),rgba(184,137,255,.16),rgba(124,255,203,.12));
+  background-size:260% 260%;
+}
+
+body.sunset-mode .gradient-orbs{
+  background:
+    radial-gradient(circle at 18% 22%,rgba(255,77,109,.20),transparent 0 25%),
+    radial-gradient(circle at 82% 20%,rgba(255,159,28,.18),transparent 0 24%),
+    radial-gradient(circle at 52% 82%,rgba(255,228,94,.15),transparent 0 22%),
+    linear-gradient(120deg,rgba(255,77,109,.14),rgba(255,159,28,.14),rgba(255,228,94,.10),rgba(255,77,109,.10));
+  background-size:260% 260%;
+}
+body.sunset-mode header{
+  background:linear-gradient(135deg,rgba(255,77,109,.17),rgba(255,159,28,.15),rgba(255,228,94,.11),rgba(255,77,109,.12)),linear-gradient(145deg,var(--header1),var(--header2));
+  background-size:280% 280%;
+}
+body.sunset-mode .btn.primary,
+body.sunset-mode .chip.active,
+body.sunset-mode .btn:hover,
+body.sunset-mode .chip:hover{
+  background:linear-gradient(90deg,rgba(255,77,109,.16),rgba(255,159,28,.15),rgba(255,228,94,.12),rgba(255,77,109,.11));
+  background-size:260% 260%;
+}
+
+body.ocean-mode .gradient-orbs{
+  background:
+    radial-gradient(circle at 18% 22%,rgba(34,230,255,.20),transparent 0 25%),
+    radial-gradient(circle at 82% 20%,rgba(98,159,255,.19),transparent 0 24%),
+    radial-gradient(circle at 52% 82%,rgba(124,255,203,.14),transparent 0 22%),
+    linear-gradient(120deg,rgba(34,230,255,.13),rgba(98,159,255,.16),rgba(124,255,203,.10),rgba(34,230,255,.11));
+  background-size:260% 260%;
+}
+body.ocean-mode header{
+  background:linear-gradient(135deg,rgba(34,230,255,.15),rgba(98,159,255,.17),rgba(124,255,203,.10),rgba(34,230,255,.11)),linear-gradient(145deg,var(--header1),var(--header2));
+  background-size:280% 280%;
+}
+body.ocean-mode .btn.primary,
+body.ocean-mode .chip.active,
+body.ocean-mode .btn:hover,
+body.ocean-mode .chip:hover{
+  background:linear-gradient(90deg,rgba(34,230,255,.16),rgba(98,159,255,.16),rgba(124,255,203,.12),rgba(34,230,255,.11));
+  background-size:260% 260%;
+}
+
+body.plasma-mode .gradient-orbs{
+  background:
+    radial-gradient(circle at 18% 22%,rgba(255,105,180,.20),transparent 0 25%),
+    radial-gradient(circle at 82% 20%,rgba(184,137,255,.20),transparent 0 24%),
+    radial-gradient(circle at 52% 82%,rgba(34,230,255,.16),transparent 0 22%),
+    linear-gradient(120deg,rgba(255,105,180,.15),rgba(184,137,255,.16),rgba(34,230,255,.12),rgba(255,77,109,.12));
+  background-size:260% 260%;
+}
+body.plasma-mode header{
+  background:linear-gradient(135deg,rgba(255,105,180,.16),rgba(184,137,255,.18),rgba(34,230,255,.12),rgba(255,77,109,.12)),linear-gradient(145deg,var(--header1),var(--header2));
+  background-size:280% 280%;
+}
+body.plasma-mode .btn.primary,
+body.plasma-mode .chip.active,
+body.plasma-mode .btn:hover,
+body.plasma-mode .chip:hover{
+  background:linear-gradient(90deg,rgba(255,105,180,.16),rgba(184,137,255,.17),rgba(34,230,255,.14),rgba(255,77,109,.12));
+  background-size:260% 260%;
+}
+
+@keyframes colorFieldShift{
+  0%{background-position:0% 50%;filter:blur(34px) saturate(1.15) hue-rotate(0deg)}
+  33%{background-position:75% 35%;filter:blur(34px) saturate(1.45) hue-rotate(18deg)}
+  66%{background-position:100% 70%;filter:blur(34px) saturate(1.30) hue-rotate(-14deg)}
+  100%{background-position:0% 50%;filter:blur(34px) saturate(1.15) hue-rotate(0deg)}
+}
+@keyframes headerColorShift{
+  0%{background-position:0% 50%;filter:saturate(1)}
+  50%{background-position:100% 50%;filter:saturate(1.28)}
+  100%{background-position:0% 50%;filter:saturate(1)}
+}
+@keyframes controlColorShift{
+  0%{background-position:0% 50%;filter:saturate(1)}
+  50%{background-position:100% 50%;filter:saturate(1.22)}
+  100%{background-position:0% 50%;filter:saturate(1)}
+}
+@keyframes waveColorShift{
+  0%{filter:drop-shadow(0 0 22px rgba(var(--wave-a),.07)) hue-rotate(0deg)}
+  50%{filter:drop-shadow(0 0 26px rgba(var(--wave-b),.11)) hue-rotate(28deg)}
+  100%{filter:drop-shadow(0 0 22px rgba(var(--wave-a),.07)) hue-rotate(0deg)}
+}
+
+@media (prefers-reduced-motion:reduce){.gradient-orbs,body.animated-theme header,body.animated-theme .btn.primary,body.animated-theme .chip.active,body.animated-theme #bg{animation:none}}}
+@media(max-width:820px){body{padding:22px 12px 42px}header{padding:24px;border-radius:24px}.stats,.source-grid{grid-template-columns:1fr}.section-head{align-items:start;flex-direction:column}.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="gradient-orbs" aria-hidden="true"></div>
+<div class="theme-panel" id="themePanel">
+  <button class="theme-toggle" id="themeToggle" type="button" aria-label="open color controls" aria-expanded="false">◐</button>
+  <div class="theme-drawer">
+    <h3>static themes</h3>
+    <div class="theme-options">
+      <button class="theme-swatch" data-theme="red" type="button" aria-label="red theme"></button>
+      <button class="theme-swatch" data-theme="orange" type="button" aria-label="orange theme"></button>
+      <button class="theme-swatch" data-theme="yellow" type="button" aria-label="yellow theme"></button>
+      <button class="theme-swatch active" data-theme="green" type="button" aria-label="green theme"></button>
+      <button class="theme-swatch" data-theme="blue" type="button" aria-label="blue theme"></button>
+      <button class="theme-swatch" data-theme="purple" type="button" aria-label="purple theme"></button>
+    </div>
+    <h3 class="theme-subhead">animated themes</h3>
+    <div class="theme-options animated-theme-options">
+      <button class="theme-swatch" data-theme="rainbow" type="button" aria-label="rainbow animated theme"></button>
+      <button class="theme-swatch" data-theme="aurora" type="button" aria-label="aurora animated theme"></button>
+      <button class="theme-swatch" data-theme="sunset" type="button" aria-label="sunset animated theme"></button>
+      <button class="theme-swatch" data-theme="ocean" type="button" aria-label="ocean animated theme"></button>
+      <button class="theme-swatch" data-theme="plasma" type="button" aria-label="plasma animated theme"></button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">modpack list builder</div>
+  <h1>modpack index generator</h1>
+  <p class="subtitle">upload a pack file, paste a modrinth modpack link, or paste a raw mod list. the page will generate a searchable, categorized mod index that can be exported as a standalone html file.</p>
+  <div class="stats">
+    <div class="stat"><strong id="visibleCount">0</strong><span>visible mods</span></div>
+    <div class="stat"><strong id="totalCount">0</strong><span>total mods</span></div>
+    <div class="stat"><strong id="directCount">0</strong><span>direct links</span></div>
+    <div class="stat"><strong id="fallbackCount">0</strong><span>search / local</span></div>
+  </div>
+</header>
+
+<section class="panel" id="builderPanel">
+  <h2>build a modlist</h2>
+  <p>best results: modrinth pack links or .mrpack files. curseforge manifest uploads work, but without a curseforge api key the browser only sees project ids, so it makes sensible fallback/search cards.</p>
+  <div class="source-grid">
+    <div class="box">
+      <h3>modrinth pack</h3>
+      <div class="row">
+        <input id="packInput" class="input" placeholder="https://modrinth.com/modpack/example or just the slug">
+        <button id="loadPackBtn" class="btn primary" type="button">load</button>
+      </div>
+      <small id="packStatus">uses the modrinth api and reads the latest .mrpack.</small>
+    </div>
+    <div class="box">
+      <h3>upload pack file</h3>
+      <label class="file-drop" id="dropZone">
+        <input id="fileInput" type="file" accept=".mrpack,.zip,.json,application/json">
+        <div><strong>drop .mrpack / .zip / manifest.json here</strong><span>or click to choose a file.</span></div>
+      </label>
+      <small id="fileStatus">no file loaded yet.</small>
+    </div>
+  </div>
+  <div class="box" style="margin-top:16px">
+    <h3>raw mod list</h3>
+    <textarea id="rawInput" placeholder="one mod per line&#10;create&#10;farmer's delight&#10;yung's api"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button id="rawBtn" class="btn" type="button">build from raw text</button>
+      <button id="sampleBtn" class="btn" type="button">load tiny sample</button>
+      <button id="clearBtn" class="btn" type="button">clear</button>
+      <button id="exportBtn" class="btn primary" type="button" disabled>export generated html</button>
+    </div>
+    <div class="statusbar" id="status">ready.</div>
+  </div>
+</section>
+
+<main>
+  <div class="toolbar">
+    <label class="searchbox"><span>⌕</span><input id="searchInput" class="input" type="search" placeholder="search mods, categories, status..." autocomplete="off"></label>
+    <div class="filters" id="filters"></div>
+  </div>
+  <div class="empty" id="empty">nothing matched that. tragic, honestly.</div>
+  <div class="sections" id="sections"></div>
+</main>
+<footer>generated locally in your browser. modrinth lookups require internet access, and uploaded .zip/.mrpack files use jszip from a cdn for parsing.</footer>
+</div>
+
+<script>
+window.addEventListener('error', e => {
+  const s = document.getElementById('status');
+  if (s) s.textContent = 'script error: ' + e.message;
+});
+const CATS={
+  qsmp:'custom / pack-specific',create:'create ecosystem',worldgen:'worldgen / structures',mobs:'mobs / creatures',
+  food:'food / farming',building:'building / decoration',equipment:'gear / travel / utility',cosmetic:'cosmetic / animation',
+  ui:'ui / qol',media:'voice / media / sound',performance:'performance / optimization',library:'libraries / dependencies',misc:'miscellaneous'
+};
+const CAT_ORDER=['qsmp','create','worldgen','mobs','food','building','equipment','cosmetic','ui','media','performance','library','misc'];
+const THEMES={
+  red:{accent:'#ff4d6d',soft:'rgba(255,77,109,.17)',alt:'rgba(255,138,61,.13)',bg:'#150708',bg2:'#2a1010',panel:'rgba(35,15,18,.80)',panel2:'rgba(52,21,25,.92)',h1:'rgba(64,22,28,.94)',h2:'rgba(24,10,12,.78)',a:'255,77,109',b:'255,138,61'},
+  orange:{accent:'#ff9f1c',soft:'rgba(255,159,28,.17)',alt:'rgba(255,209,102,.13)',bg:'#140d06',bg2:'#2b1a08',panel:'rgba(37,24,12,.80)',panel2:'rgba(56,35,15,.92)',h1:'rgba(72,42,16,.94)',h2:'rgba(24,15,7,.78)',a:'255,159,28',b:'255,209,102'},
+  yellow:{accent:'#ffe45e',soft:'rgba(255,228,94,.15)',alt:'rgba(184,243,91,.12)',bg:'#111006',bg2:'#252308',panel:'rgba(34,32,13,.80)',panel2:'rgba(50,47,17,.92)',h1:'rgba(64,60,20,.94)',h2:'rgba(23,22,8,.78)',a:'255,228,94',b:'184,243,91'},
+  green:{accent:'#1bd96a',soft:'rgba(27,217,106,.15)',alt:'rgba(124,255,203,.12)',bg:'#07100d',bg2:'#0b1712',panel:'rgba(15,27,23,.78)',panel2:'rgba(20,36,30,.92)',h1:'rgba(18,35,28,.94)',h2:'rgba(10,16,14,.75)',a:'27,217,106',b:'124,255,203'},
+  blue:{accent:'#22e6ff',soft:'rgba(34,230,255,.15)',alt:'rgba(98,159,255,.14)',bg:'#061013',bg2:'#081b25',panel:'rgba(12,30,34,.80)',panel2:'rgba(14,43,48,.92)',h1:'rgba(15,48,60,.94)',h2:'rgba(7,18,24,.78)',a:'34,230,255',b:'98,159,255'},
+  purple:{accent:'#b889ff',soft:'rgba(184,137,255,.17)',alt:'rgba(255,105,180,.13)',bg:'#100817',bg2:'#1d102b',panel:'rgba(27,16,37,.80)',panel2:'rgba(40,22,54,.92)',h1:'rgba(47,26,70,.94)',h2:'rgba(18,10,25,.78)',a:'184,137,255',b:'255,105,180'},
+  rainbow:{accent:'#f4fff8',soft:'rgba(255,255,255,.13)',alt:'rgba(34,230,255,.13)',bg:'#09070f',bg2:'#151127',panel:'rgba(22,18,32,.82)',panel2:'rgba(31,24,45,.92)',h1:'rgba(34,24,52,.94)',h2:'rgba(14,10,20,.78)',a:'255,77,109',b:'34,230,255'},
+  aurora:{accent:'#7cffcb',soft:'rgba(124,255,203,.16)',alt:'rgba(184,137,255,.13)',bg:'#061011',bg2:'#102027',panel:'rgba(12,30,30,.80)',panel2:'rgba(18,42,45,.92)',h1:'rgba(18,52,50,.94)',h2:'rgba(8,20,22,.78)',a:'124,255,203',b:'184,137,255'},
+  sunset:{accent:'#ff9f1c',soft:'rgba(255,159,28,.17)',alt:'rgba(255,77,109,.13)',bg:'#150a07',bg2:'#2e160d',panel:'rgba(38,22,13,.80)',panel2:'rgba(56,30,16,.92)',h1:'rgba(75,36,18,.94)',h2:'rgba(24,12,8,.78)',a:'255,159,28',b:'255,77,109'},
+  ocean:{accent:'#22e6ff',soft:'rgba(34,230,255,.15)',alt:'rgba(98,159,255,.14)',bg:'#061013',bg2:'#071b2a',panel:'rgba(10,29,38,.80)',panel2:'rgba(13,42,58,.92)',h1:'rgba(13,48,70,.94)',h2:'rgba(6,17,25,.78)',a:'34,230,255',b:'98,159,255'},
+  plasma:{accent:'#ff69b4',soft:'rgba(255,105,180,.16)',alt:'rgba(34,230,255,.13)',bg:'#100817',bg2:'#241034',panel:'rgba(31,16,40,.82)',panel2:'rgba(48,23,65,.92)',h1:'rgba(58,24,72,.94)',h2:'rgba(18,10,25,.78)',a:'255,105,180',b:'34,230,255'}
+};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm=s=>String(s||'').toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]+/g,' ').trim();
+const searchUrl=n=>`https://modrinth.com/mods?q=${encodeURIComponent(n)}`;
+let mods=[],active='all';
+
+function cat(name){
+  const n=norm(name);
+  if(/qassets|qemotes|qfigura|qlib|qutils|qvideo|figura.*addon|custom|packmenu/.test(n))return'qsmp';
+  if(/create|flywheel|ponder|copycat|slice and dice|steam rails|crafts additions/.test(n))return'create';
+  if(/biome|terralith|tectonic|structure|dungeon|village|tower|fortress|mineshaft|stronghold|monument|temple|witch hut|world|region|lithostitched|formation|bridge|cave|town|aether|nether|dungeons arise|yung/.test(n))return'worldgen';
+  if(/mob|creeper|enderman|zombie|golem|alex|critter|ribbit|animal|creature|boss|cataclysm|ice and fire/.test(n))return'mobs';
+  if(/food|farm|delight|bakery|brewery|vinery|chef|crab|crop|cooking|spice|beachparty/.test(n))return'food';
+  if(/macaw|furniture|deco|decor|chipped|chisel|handcrafted|supplementaries|glass|door|trapdoor|fence|lamp|light|slab|building|framed|clutter/.test(n))return'building';
+  if(/backpack|waystone|paraglider|comfort|corpse|loot|weapon|shield|tool|armor|netherite|security|elevator|artifact|relic/.test(n))return'equipment';
+  if(/skin|cape|cosmetic|animation|animator|emote|model feature|texture feature|hat|plush|wavey|visual|footsteps/.test(n))return'cosmetic';
+  if(/jei|jade|wthit|appleskin|tooltip|advancement|menu|zoom|map|xaero|journey|controlling|chat|inventory|mouse|configured|catalogue|enchantment|f3|gui|ui|language|translation/.test(n))return'ui';
+  if(/voice|sound|audio|music|video|media|speaker/.test(n))return'media';
+  if(/sodium|rubidium|embeddium|oculus|iris|lithium|radium|starlight|ferrite|modernfix|immediatelyfast|dynamic fps|entityculling|cull|memory|fps|performance|spark|krypton/.test(n))return'performance';
+  if(/api|lib|library|architectury|cloth|forge config|fabric api|kotlin|gecko|citadel|balm|moonlight|puzzles|terrablender|resourceful|kubejs|rhino|bad packets|connector|yacl|curios|trinkets|bookshelf|iceberg|prism|octolib|corgilib|structure gel|valhelsia core/.test(n))return'library';
+  return'misc';
+}
+function enrich(x){
+  const name=x.name||x.title||x.fileName||x.slug||x.projectId||'unknown mod';
+  const category=x.category||cat(name);
+  let status=x.status||'search',url=x.url||'';
+  if(x.slug){url=`https://modrinth.com/mod/${x.slug}`;status='direct'}
+  if(!url)url=searchUrl(name);
+  return{...x,name,category,status,url,normalized:norm(name)};
+}
+function setMods(list,msg){
+  const seen=new Set();
+  mods=list.map(enrich).filter(m=>{const k=m.normalized||m.name;if(!k||seen.has(k))return false;seen.add(k);return true})
+    .sort((a,b)=>CAT_ORDER.indexOf(a.category)-CAT_ORDER.indexOf(b.category)||a.name.localeCompare(b.name));
+  active='all';$('searchInput').value='';$('exportBtn').disabled=!mods.length;$('status').textContent=msg||`built ${mods.length} mods.`;render();
+  if(mods.length)document.querySelector('main').scrollIntoView({behavior:'smooth'});
+}
+function render(){
+  const q=$('searchInput').value.trim().toLowerCase();
+  const counts=Object.fromEntries(CAT_ORDER.map(c=>[c,mods.filter(m=>m.category===c).length]));
+  const total=mods.length;
+  $('totalCount').textContent=total;$('directCount').textContent=mods.filter(m=>m.status==='direct').length;$('fallbackCount').textContent=mods.filter(m=>m.status!=='direct').length;
+  $('filters').innerHTML=`<button class="chip ${active==='all'?'active':''}" data-filter="all">all <span>${total}</span></button>`+CAT_ORDER.filter(c=>counts[c]).map(c=>`<button class="chip ${active===c?'active':''}" data-filter="${c}">${esc(CATS[c])} <span>${counts[c]}</span></button>`).join('');
+  let visible=0;
+  $('sections').innerHTML=CAT_ORDER.filter(c=>counts[c]).map(c=>{
+    const cards=mods.filter(m=>m.category===c).filter(m=>(active==='all'||active===c)&&(!q||`${m.name} ${CATS[m.category]} ${m.status} ${m.projectId||''}`.toLowerCase().includes(q)));
+    if(!cards.length)return'';visible+=cards.length;
+    return`<section class="category-section"><div class="section-head"><h2>${esc(CATS[c])}</h2><p><span>${cards.length}</span> mods</p></div><div class="grid">${cards.map(card).join('')}</div></section>`;
+  }).join('');
+  $('visibleCount').textContent=visible;$('empty').style.display=visible?'none':'block';
+  document.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{active=ch.dataset.filter;render()});
+}
+function card(m){
+  const status=m.status==='direct'?'direct':m.status==='local'?'local':'search';
+  return`<article class="mod-card"><a href="${esc(m.url)}" target="_blank" rel="noopener noreferrer"><div class="mod-top"><span class="category-pill">${esc(CATS[m.category])}</span><span class="status ${status}">${status}</span></div><div><h2>${esc(m.name)}</h2>${m.projectId?`<small>id: ${esc(m.projectId)}</small>`:''}</div></a></article>`;
+}
+async function api(path){const r=await fetch(`https://api.modrinth.com/v2/${path}`);if(!r.ok)throw new Error(`modrinth api ${r.status}`);return r.json()}
+function slugFromInput(v){v=v.trim();try{const u=new URL(v);return u.pathname.split('/').filter(Boolean).pop()}catch{return v.replace(/^modpack\//,'')}}
+async function loadPack(){
+  try{
+    $('packStatus').textContent='loading pack...';
+    const id=slugFromInput($('packInput').value); if(!id)throw new Error('paste a link or slug first.');
+    const project=await api(`project/${encodeURIComponent(id)}`); if(project.project_type!=='modpack')throw new Error('that is not a modpack.');
+    const versions=await api(`project/${project.id}/version`); if(!versions.length)throw new Error('no versions found.');
+    const file=(versions[0].files||[]).find(f=>f.filename&&f.filename.endsWith('.mrpack'))||(versions[0].files||[]).find(f=>f.primary)||versions[0].files?.[0]; if(!file?.url)throw new Error('no .mrpack download found.');
+    const blob=await fetch(file.url).then(r=>{if(!r.ok)throw new Error('download failed.');return r.blob()});
+    const list=await parseMrpack(blob);
+    setMods(list,`loaded ${list.length} mods from ${project.title}.`);
+    $('packStatus').textContent=`loaded latest version: ${versions[0].name}`;
+  }catch(e){$('packStatus').textContent=`nope: ${e.message}`;$('status').textContent=`modrinth load failed: ${e.message}`}
+}
+async function parseMrpack(blob){
+  if(!window.JSZip)throw new Error('jszip did not load. open this file with internet access, or upload/paste a raw list instead.');
+  const zip=await JSZip.loadAsync(blob), idx=zip.file('modrinth.index.json'); if(!idx)throw new Error('not a modrinth .mrpack.');
+  const json=JSON.parse(await idx.async('string'));
+  const ids=[],fallback=[];
+  (json.files||[]).filter(f=>(f.path||'').startsWith('mods/')&&(f.path||'').endsWith('.jar')).forEach(f=>{
+    const id=(f.downloads||[]).map(u=>(String(u).match(/cdn\.modrinth\.com\/data\/([^/]+)/)||[])[1]).find(Boolean);
+    if(id)ids.push(id); else fallback.push({name:(f.path||'unknown.jar').split('/').pop().replace(/\.jar$/,'').replace(/[-_]+/g,' ')});
+  });
+  const unique=[...new Set(ids)],items=[];
+  for(let i=0;i<unique.length;i+=100){
+    const chunk=unique.slice(i,i+100);
+    try{(await api(`projects?ids=${encodeURIComponent(JSON.stringify(chunk))}`)).forEach(p=>items.push({name:p.title,slug:p.slug,status:'direct'}))}
+    catch{chunk.forEach(id=>items.push({name:id,projectId:id,status:'search'}))}
+  }
+  return items.concat(fallback);
+}
+async function parseZip(file){
+  if(!window.JSZip)throw new Error('jszip did not load. open this file with internet access, or upload/paste a raw list instead.');
+  const zip=await JSZip.loadAsync(file);
+  if(zip.file('modrinth.index.json'))return parseMrpack(file);
+  const mf=zip.file('manifest.json')||Object.values(zip.files).find(f=>/(^|\/)manifest\.json$/i.test(f.name));
+  if(!mf)throw new Error('no manifest.json found.');
+  return parseManifest(JSON.parse(await mf.async('string')));
+}
+function parseManifest(j){
+  const files=j.files||j.projects||[]; if(!Array.isArray(files)||!files.length)throw new Error('manifest has no files list.');
+  return files.map(f=>{const id=f.projectID||f.projectId||f.project_id||f.id||f.addonID||f.addonId;return{name:f.name||f.title||f.fileName||(id?`curseforge project ${id}`:'unknown project'),projectId:id,status:'local'}});
+}
+async function handleFile(file){
+  try{
+    $('fileStatus').textContent=`reading ${file.name}...`;
+    let list;
+    if(file.name.toLowerCase().endsWith('.json'))list=parseManifest(JSON.parse(await file.text()));
+    else if(file.name.toLowerCase().endsWith('.mrpack'))list=await parseMrpack(file);
+    else if(file.name.toLowerCase().endsWith('.zip'))list=await parseZip(file);
+    else throw new Error('unsupported file type.');
+    setMods(list,`loaded ${list.length} mods from ${file.name}.`);$('fileStatus').textContent=`loaded ${file.name}`;
+  }catch(e){$('fileStatus').textContent=`nope: ${e.message}`;$('status').textContent=`file failed: ${e.message}`}
+}
+function raw(){
+  const lines=$('rawInput').value.split(/\n|,/).map(s=>s.trim().replace(/^[-*•\d.)\s]+/,'')).filter(Boolean);
+  setMods(lines.map(name=>({name,status:'search'})),`built ${lines.length} mods from raw text.`);
+}
+function clearAll(){mods=[];active='all';$('rawInput').value='';$('packInput').value='';$('searchInput').value='';$('exportBtn').disabled=true;$('status').textContent='cleared.';render()}
+function sample(){setMods(["Create","Farmer's Delight","YUNG's API","ModernFix","Waystones","Macaw's Furniture","Simple Voice Chat","Terralith","Entity Model Features"].map(name=>({name,status:"search"})),"loaded tiny sample.")}
+function exportHtml(){
+  const payload = JSON.stringify(mods.map(({name,category,status,url,projectId,slug}) => ({name,category,status,url,projectId,slug})));
+  let doc = '<!doctype html>\\n' + document.documentElement.outerHTML;
+  doc = doc.replace("let mods=[],active='all';", `let mods=${payload},active='all';`);
+  doc = doc.replace('render();\\n' + '</scr' + 'ipt>', 'render();document.getElementById("builderPanel").style.display="none";document.getElementById("exportBtn").disabled=false;\\n' + '</scr' + 'ipt>');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([doc], {type:'text/html'}));
+  a.download = 'generated_modpack_index.html';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+$('loadPackBtn').onclick=loadPack;$('rawBtn').onclick=raw;$('clearBtn').onclick=clearAll;$('sampleBtn').onclick=sample;$('exportBtn').onclick=exportHtml;$('searchInput').oninput=render;
+$('fileInput').onchange=e=>e.target.files[0]&&handleFile(e.target.files[0]);
+const drop=$('dropZone');drop.ondragover=e=>{e.preventDefault();drop.classList.add('dragover')};drop.ondragleave=()=>drop.classList.remove('dragover');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('dragover');if(e.dataTransfer.files[0])handleFile(e.dataTransfer.files[0])};
+
+function applyTheme(n){const t=THEMES[n]||THEMES.green,r=document.documentElement;r.style.setProperty('--accent',t.accent);r.style.setProperty('--accent-soft',t.soft);r.style.setProperty('--alt-soft',t.alt);r.style.setProperty('--bg',t.bg);r.style.setProperty('--bg2',t.bg2);r.style.setProperty('--panel',t.panel);r.style.setProperty('--panel2',t.panel2);r.style.setProperty('--header1',t.h1);r.style.setProperty('--header2',t.h2);r.style.setProperty('--wave-a',t.a);r.style.setProperty('--wave-b',t.b);['rainbow','aurora','sunset','ocean','plasma'].forEach(mode=>document.body.classList.toggle(mode+'-mode',n===mode));document.body.classList.toggle('animated-theme',['rainbow','aurora','sunset','ocean','plasma'].includes(n));document.querySelectorAll('.theme-swatch').forEach(s=>s.classList.toggle('active',s.dataset.theme===n))}
+$('themeToggle').onclick=()=>{const open=$('themePanel').classList.toggle('open');$('themeToggle').setAttribute('aria-expanded',String(open))};document.querySelectorAll('.theme-swatch').forEach(s=>s.onclick=()=>applyTheme(s.dataset.theme));
+
+if(!matchMedia('(prefers-reduced-motion: reduce)').matches){
+  const c=$('bg'),x=c.getContext('2d');let dpr=1,w=0,h=0,t=0;
+  function resize(){dpr=Math.min(devicePixelRatio||1,2);w=innerWidth;h=innerHeight;c.width=w*dpr;c.height=h*dpr;c.style.width=w+'px';c.style.height=h+'px';x.setTransform(dpr,0,0,dpr,0,0)}resize();addEventListener('resize',resize);
+  function wave(y,amp,freq,phase,alpha,width,color,glow){x.beginPath();const step=Math.max(8,w/120);for(let xx=-step;xx<=w+step;xx+=step){const yy=y+Math.sin(xx*freq+phase)*amp+Math.sin(xx*freq*.45+phase*.75)*amp*.24;xx<=0?x.moveTo(xx,yy):x.lineTo(xx,yy)}if(glow){x.strokeStyle=color.replace('A',(alpha*.35).toFixed(3));x.lineWidth=width*2.6;x.stroke();x.beginPath();for(let xx=-step;xx<=w+step;xx+=step){const yy=y+Math.sin(xx*freq+phase)*amp+Math.sin(xx*freq*.45+phase*.75)*amp*.24;xx<=0?x.moveTo(xx,yy):x.lineTo(xx,yy)}}x.strokeStyle=color.replace('A',alpha.toFixed(3));x.lineWidth=width;x.lineCap='round';x.stroke()}
+  function draw(){t+=.01;x.clearRect(0,0,w,h);x.save();x.globalCompositeOperation='screen';const a=getComputedStyle(document.documentElement).getPropertyValue('--wave-a').trim()||'27,217,106',b=getComputedStyle(document.documentElement).getPropertyValue('--wave-b').trim()||'124,255,203';for(let i=0;i<17;i++){const p=i/16,y=h*.055+(h*.91)*p,dir=i%2? -1:1,pulse=(Math.sin(t*(.55+i*.037)+i*1.13)+1)*.07,col=i%4===1?`rgba(${a},A)`:i%4===3?`rgba(${b},A)`:'rgba(255,255,255,A)';wave(y,11+(i%6)*3.5+Math.sin(t*.62+i)*2,.007+(i%5)*.00145,dir*t*(.62+i*.026)+i*.68,.025+pulse*(.36+(i%4)*.055),.85+(i%5)*.17,col,i%4===1||i%4===3)}x.restore();requestAnimationFrame(draw)}draw();
+}
+render();
+</script>
+</body>
+</html>
