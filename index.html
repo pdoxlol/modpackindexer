@@ -120,6 +120,39 @@ input::placeholder,textarea::placeholder{color:#809085}
 .status.search{color:#cfe0ff;background:var(--alt-soft);border:1px solid rgba(var(--wave-b),.24)}
 .status.local{color:#fff0c7;background:rgba(255,209,102,.13);border:1px solid rgba(255,209,102,.22)}
 .mod-card h2{margin:0;font-size:18px;line-height:1.15;letter-spacing:-.025em}.mod-card small{display:block;margin-top:8px;color:var(--muted);font-size:12px}
+
+.sort-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:10px;
+}
+.confidence-pill{
+  display:inline-flex;
+  align-items:center;
+  width:max-content;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:999px;
+  padding:4px 8px;
+  font-size:10px;
+  font-weight:850;
+  letter-spacing:.05em;
+  text-transform:uppercase;
+  color:var(--muted);
+  background:rgba(255,255,255,.045);
+}
+.confidence-pill.high{color:#b7f7d4;border-color:rgba(183,247,212,.22);background:rgba(82,227,165,.10)}
+.confidence-pill.medium{color:#dbeafe;border-color:rgba(155,216,255,.22);background:rgba(98,168,255,.10)}
+.confidence-pill.low{color:#fff0c7;border-color:rgba(255,209,102,.22);background:rgba(255,209,102,.10)}
+.confidence-pill.manual{color:#f0abfc;border-color:rgba(240,171,252,.22);background:rgba(240,171,252,.10)}
+
+.mod-card{
+  position:relative;
+}
+.mod-card a{
+  display:block;
+}
+
 .empty{display:none;border:1px dashed var(--line);border-radius:24px;padding:28px;color:var(--muted);text-align:center;background:rgba(255,255,255,.035)}
 
 .theme-panel.open 
@@ -263,7 +296,7 @@ body.animated-theme
 
 <section class="panel" id="builderPanel">
   <h2>build a modlist</h2>
-  <p>best results: modrinth pack links, .mrpack files, or .zip folders full of .jar files. curseforge manifest uploads work, but without a curseforge api key the browser only sees project ids, so it makes sensible fallback/search cards.</p>
+  <p>best results: modrinth pack links, .mrpack files, or fandom wiki pages with a mod table. curseforge manifest uploads work, but without a curseforge api key the browser only sees project ids, so it makes sensible fallback/search cards.</p>
   <div class="source-grid">
     <div class="box">
       <h3>modrinth pack</h3>
@@ -328,9 +361,27 @@ window.addEventListener('error', e => {
   if (s) s.textContent = 'script error: ' + e.message;
 });
 const CATS={
-  qsmp:'custom / pack-specific',create:'create ecosystem',worldgen:'worldgen / structures',mobs:'mobs / creatures',
-  food:'food / farming',building:'building / decoration',equipment:'gear / travel / utility',cosmetic:'cosmetic / animation',
-  ui:'ui / qol',media:'voice / media / sound',performance:'performance / optimization',library:'libraries / dependencies',misc:'miscellaneous'
+  qsmp:'custom / pack-specific',
+  create:'create ecosystem',
+  worldgen:'worldgen / structures',
+  mobs:'mobs / creatures',
+  food:'food / farming',
+  building:'building blocks',
+  decoration:'decoration / furniture',
+  equipment:'equipment / tools',
+  combat:'weapons / combat',
+  storage:'storage / backpacks',
+  travel:'travel / transport',
+  magic:'magic / abilities',
+  cosmetic:'cosmetic / animation',
+  ui:'ui / menus',
+  qol:'quality of life',
+  maps:'maps / navigation',
+  media:'voice / media / sound',
+  performance:'performance / optimization',
+  library:'libraries / dependencies',
+  review:'needs review',
+  misc:'miscellaneous'
 };
 
 
@@ -340,15 +391,15 @@ const CATS={
 
 
 
-const CAT_ORDER=['qsmp','create','worldgen','mobs','food','building','equipment','cosmetic','ui','media','performance','library','misc'];
+const CAT_ORDER=['qsmp','create','worldgen','mobs','food','building','decoration','equipment','combat','storage','travel','magic','cosmetic','ui','qol','maps','media','performance','library','review','misc'];
 
-const MODRINTH_CATEGORY_MAP={
+const PLATFORM_CATEGORY_MAP={
   equipment:'equipment',
-  storage:'equipment',
-  transportation:'equipment',
-  utility:'ui',
-  adventure:'equipment',
-  decoration:'building',
+  storage:'storage',
+  transportation:'travel',
+  utility:'qol',
+  adventure:'combat',
+  decoration:'decoration',
   food:'food',
   worldgen:'worldgen',
   mobs:'mobs',
@@ -356,27 +407,98 @@ const MODRINTH_CATEGORY_MAP={
   library:'library',
   social:'media',
   technology:'create',
-  magic:'equipment'
+  magic:'magic'
 };
 
-function categoryFromModrinthProject(project){
+function scoreFromOfficialCategories(project){
   const cats=[
     ...(project.categories||[]),
     ...(project.display_categories||[]),
     ...(project.additional_categories||[])
   ].map(c=>norm(c));
 
-  // priority matters: a gun/tools mod tagged both "adventure" and "equipment"
-  // should be grouped as equipment, not miscellaneous/adventure.
   const priority=[
     'equipment','storage','transportation','food','decoration','worldgen','mobs',
     'optimization','library','social','technology','magic','utility','adventure'
   ];
 
   for(const key of priority){
-    if(cats.includes(key)) return MODRINTH_CATEGORY_MAP[key]||'misc';
+    if(cats.includes(key)){
+      return {
+        category:PLATFORM_CATEGORY_MAP[key]||'misc',
+        categorySource:'official platform category',
+        categoryConfidence:'high',
+        matched:key
+      };
+    }
   }
   return null;
+}
+
+function decideByRules(text, source='description keywords'){
+  const n=norm(text);
+  const rules=[
+    ['qsmp',/qassets|qemotes|qfigura|qlib|qutils|qvideo|figura.*addon|custom|packmenu|pack specific/],
+    ['create',/create|flywheel|ponder|copycat|slice and dice|steam rails|crafts additions|contraption|kinetic|mechanical/],
+    ['worldgen',/biome|terralith|tectonic|structure|dungeon|village|tower|fortress|mineshaft|stronghold|monument|temple|witch hut|world generation|worldgen|terrain|region|lithostitched|formation|bridge|cave|town|aether|nether|dungeons arise|yung/],
+    ['mobs',/mob|creeper|enderman|zombie|golem|alex.?s mobs|critter|ribbit|animal|creature|boss|cataclysm|ice and fire|entity/],
+    ['food',/food|farm|delight|bakery|brewery|vinery|chef|crab|crop|cooking|spice|beachparty|meal|recipe/],
+    ['building',/block|building|slab|stair|wall|roof|brick|stone|wood|plank|framed|chipped|chisel|glass|door|trapdoor|fence/],
+    ['decoration',/furniture|deco|decor|handcrafted|supplementaries|lamp|light|clutter|plush|display|shelf|table|chair/],
+    ['combat',/gun|ammo|weapon|combat|sword|shield|armor|boss|fight|damage|spell|tacz|timeless and classics|mowzie|cataclysm/],
+    ['storage',/backpack|storage|chest|drawer|barrel|sophisticated|bag|container|inventory sorter/],
+    ['travel',/waystone|paraglider|elevator|transport|travel|vehicle|mount|boat|cart|rail|teleport|warp|portal/],
+    ['magic',/magic|spell|mana|ars|occult|botania|hexerei|irons spell|wizard|wand|ritual/],
+    ['cosmetic',/skin|cape|cosmetic|animation|animator|emote|model feature|texture feature|hat|visual|footsteps|particle|shader/],
+    ['maps',/map|xaero|journey|minimap|atlas|waypoint|navigation|compass/],
+    ['ui',/jei|rei|emi|jade|wthit|appleskin|tooltip|advancement|menu|zoom|controlling|chat|configured|catalogue|enchantment|f3|gui|ui|language|translation|recipe viewer/],
+    ['qol',/quality of life|qol|inventory|mouse|tweak|trashslot|carry|harvest|fast leaf|right click|sort|search|convenient|utility/],
+    ['media',/voice|sound|audio|music|video|media|speaker|simple voice chat|ambience/],
+    ['performance',/sodium|rubidium|embeddium|oculus|iris|lithium|radium|starlight|ferrite|modernfix|immediatelyfast|dynamic fps|entityculling|cull|memory|fps|performance|spark|krypton|optimization|optimize/],
+    ['library',/api|lib|library|architectury|cloth|forge config|fabric api|kotlin|gecko|citadel|balm|moonlight|puzzles|terrablender|resourceful|kubejs|rhino|bad packets|connector|yacl|curios|trinkets|bookshelf|iceberg|prism|octolib|corgilib|structure gel|valhelsia core|framework|dependency/]
+  ];
+  for(const [category,regex] of rules){
+    if(regex.test(n)){
+      return {
+        category,
+        categorySource:source,
+        categoryConfidence:source.includes('description')?'medium':'low',
+        matched:regex.source
+      };
+    }
+  }
+  return null;
+}
+
+function chooseCategory(x){
+  if(x.category && CATS[x.category]){
+    return {
+      category:x.category,
+      categorySource:x.categorySource||'official platform category',
+      categoryConfidence:x.categoryConfidence||'high',
+      matched:x.matched||''
+    };
+  }
+
+  const descriptionText=[x.description,x.summary,x.body].filter(Boolean).join(' ');
+  if(descriptionText){
+    const byDesc=decideByRules(`${x.name||''} ${descriptionText}`,'description keywords');
+    if(byDesc)return byDesc;
+  }
+
+  const byName=decideByRules(`${x.name||x.title||x.fileName||x.slug||''} ${x.source||''}`,'name / filename guess');
+  if(byName)return byName;
+
+  return {
+    category:'review',
+    categorySource:'needs review',
+    categoryConfidence:'low',
+    matched:''
+  };
+}
+
+function categoryFromModrinthProject(project){
+  return scoreFromOfficialCategories(project);
 }
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -444,28 +566,26 @@ const searchUrl=n=>`https://modrinth.com/mods?q=${encodeURIComponent(n)}`;
 let mods=[],active='all',currentPack=null;
 
 function cat(name){
-  const n=norm(name);
-  if(/qassets|qemotes|qfigura|qlib|qutils|qvideo|figura.*addon|custom|packmenu/.test(n))return'qsmp';
-  if(/create|flywheel|ponder|copycat|slice and dice|steam rails|crafts additions/.test(n))return'create';
-  if(/biome|terralith|tectonic|structure|dungeon|village|tower|fortress|mineshaft|stronghold|monument|temple|witch hut|world|region|lithostitched|formation|bridge|cave|town|aether|nether|dungeons arise|yung/.test(n))return'worldgen';
-  if(/mob|creeper|enderman|zombie|golem|alex|critter|ribbit|animal|creature|boss|cataclysm|ice and fire/.test(n))return'mobs';
-  if(/food|farm|delight|bakery|brewery|vinery|chef|crab|crop|cooking|spice|beachparty/.test(n))return'food';
-  if(/macaw|furniture|deco|decor|chipped|chisel|handcrafted|supplementaries|glass|door|trapdoor|fence|lamp|light|slab|building|framed|clutter/.test(n))return'building';
-  if(/backpack|waystone|paraglider|comfort|corpse|loot|weapon|shield|tool|armor|netherite|security|elevator|artifact|relic/.test(n))return'equipment';
-  if(/skin|cape|cosmetic|animation|animator|emote|model feature|texture feature|hat|plush|wavey|visual|footsteps/.test(n))return'cosmetic';
-  if(/jei|jade|wthit|appleskin|tooltip|advancement|menu|zoom|map|xaero|journey|controlling|chat|inventory|mouse|configured|catalogue|enchantment|f3|gui|ui|language|translation/.test(n))return'ui';
-  if(/voice|sound|audio|music|video|media|speaker/.test(n))return'media';
-  if(/sodium|rubidium|embeddium|oculus|iris|lithium|radium|starlight|ferrite|modernfix|immediatelyfast|dynamic fps|entityculling|cull|memory|fps|performance|spark|krypton/.test(n))return'performance';
-  if(/api|lib|library|architectury|cloth|forge config|fabric api|kotlin|gecko|citadel|balm|moonlight|puzzles|terrablender|resourceful|kubejs|rhino|bad packets|connector|yacl|curios|trinkets|bookshelf|iceberg|prism|octolib|corgilib|structure gel|valhelsia core/.test(n))return'library';
-  return'misc';
+  return chooseCategory({name}).category;
 }
 function enrich(x){
   const name=x.name||x.title||x.fileName||x.slug||x.projectId||'unknown mod';
-  const category=x.category||cat(name);
+  const decision=chooseCategory({...x,name});
   let status=x.status||'search',url=x.url||'';
   if(x.slug){url=`https://modrinth.com/mod/${x.slug}`;status='direct'}
   if(!url)url=searchUrl(name);
-  return{...x,name,category,status,url,description:x.description||'',normalized:norm(name)};
+  return{
+    ...x,
+    name,
+    category:decision.category,
+    categorySource:x.categorySource||decision.categorySource,
+    categoryConfidence:x.categoryConfidence||decision.categoryConfidence,
+    matched:x.matched||decision.matched||'',
+    status,
+    url,
+    description:x.description||'',
+    normalized:norm(name)
+  };
 }
 
 
@@ -556,11 +676,89 @@ function smoothScrollToElement(el, offset=22, duration=1100){
   });
 }
 
+
+function similarity(a,b){
+  a=norm(a); b=norm(b);
+  if(!a||!b)return 0;
+  if(a===b)return 1;
+  if(a.includes(b)||b.includes(a))return .86;
+  const A=new Set(a.split(' ').filter(Boolean));
+  const B=new Set(b.split(' ').filter(Boolean));
+  const intersection=[...A].filter(x=>B.has(x)).length;
+  const union=new Set([...A,...B]).size || 1;
+  return intersection/union;
+}
+
+function bestModrinthHit(name,hits){
+  let best=null,score=0;
+  for(const h of hits||[]){
+    const candidates=[h.title,h.slug,h.description].filter(Boolean);
+    const s=Math.max(...candidates.map(c=>similarity(name,c)));
+    if(s>score){score=s;best=h}
+  }
+  return score>=.54?{hit:best,score}:null;
+}
+
+async function hydrateFromModrinthPage(mod){
+  const query=cleanJarName(mod.source||mod.name);
+  const facets=encodeURIComponent(JSON.stringify([['project_type:mod']]));
+  const results=await api(`search?query=${encodeURIComponent(query)}&facets=${facets}&limit=5`);
+  const picked=bestModrinthHit(query,results.hits||[]);
+  if(!picked)return false;
+
+  const project=await api(`project/${encodeURIComponent(picked.hit.project_id)}`);
+  const official=categoryFromModrinthProject(project);
+  const descriptionDecision=decideByRules(`${project.title} ${project.description||''}`,'modrinth page description');
+  const decision=official||descriptionDecision||chooseCategory({name:project.title,description:project.description});
+
+  mod.name=project.title||mod.name;
+  mod.slug=project.slug;
+  mod.url=`https://modrinth.com/mod/${project.slug}`;
+  mod.status='direct';
+  mod.description=project.description||mod.description||'';
+  mod.modrinthCategories=[...(project.categories||[]),...(project.additional_categories||[])];
+  mod.category=decision.category;
+  mod.categorySource=official?'modrinth project page category':'modrinth project page description';
+  mod.categoryConfidence=picked.score>.76?'high':'medium';
+  mod.matched=`matched ${query} → ${project.title}`;
+  mod.normalized=norm(mod.name);
+  return true;
+}
+
+let enrichmentRun=0;
+async function enrichFromModrinthPages(){
+  const run=++enrichmentRun;
+  const targets=mods.filter(m=>m.status!=='direct' && m.categoryConfidence!=='high').slice(0,90);
+  if(!targets.length)return;
+
+  const originalStatus=$('status').textContent;
+  $('status').textContent=`${originalStatus} checking modrinth pages for better matches...`;
+
+  let improved=0;
+  for(const mod of targets){
+    if(run!==enrichmentRun)return;
+    try{
+      if(await hydrateFromModrinthPage(mod))improved++;
+    }catch{}
+  }
+
+  if(run!==enrichmentRun)return;
+  mods=mods.sort((a,b)=>CAT_ORDER.indexOf(a.category)-CAT_ORDER.indexOf(b.category)||a.name.localeCompare(b.name));
+  render();
+  if(improved){
+    $('status').textContent=`improved ${improved} categories using modrinth project pages.`;
+  }else{
+    $('status').textContent=originalStatus;
+  }
+}
+
 function setMods(list,msg){
   const seen=new Set();
+  enrichmentRun++;
   mods=list.map(enrich).filter(m=>{const k=m.normalized||m.name;if(!k||seen.has(k))return false;seen.add(k);return true})
     .sort((a,b)=>CAT_ORDER.indexOf(a.category)-CAT_ORDER.indexOf(b.category)||a.name.localeCompare(b.name));
   active='all';$('searchInput').value='';$('exportBtn').disabled=!mods.length;$('status').textContent=msg||`built ${mods.length} mods.`;render();
+  enrichFromModrinthPages();
   if(mods.length){
     const target = document.querySelector('#packHero.visible') || document.querySelector('main');
     smoothScrollToElement(target, 22, 1100);
@@ -570,38 +768,210 @@ function render(){
   const q=$('searchInput').value.trim().toLowerCase();
   const counts=Object.fromEntries(CAT_ORDER.map(c=>[c,mods.filter(m=>m.category===c).length]));
   const total=mods.length;
-  $('totalCount').textContent=total;$('directCount').textContent=mods.filter(m=>m.status==='direct').length;$('fallbackCount').textContent=mods.filter(m=>m.status!=='direct').length;
-  $('filters').innerHTML=`<button class="chip ${active==='all'?'active':''}" data-filter="all">all <span>${total}</span></button>`+CAT_ORDER.filter(c=>counts[c]).map(c=>`<button class="chip ${active===c?'active':''}" data-filter="${c}">${esc(CATS[c])} <span>${counts[c]}</span></button>`).join('');
+  $('totalCount').textContent=total;
+  $('directCount').textContent=mods.filter(m=>m.status==='direct').length;
+  $('fallbackCount').textContent=mods.filter(m=>m.status!=='direct'||m.categoryConfidence==='low').length;
+
+  $('filters').innerHTML=`<button class="chip ${active==='all'?'active':''}" data-filter="all">all <span>${total}</span></button>`+
+    CAT_ORDER.filter(c=>counts[c]).map(c=>`<button class="chip ${active===c?'active':''}" data-filter="${c}">${esc(CATS[c])} <span>${counts[c]}</span></button>`).join('');
+
   let visible=0;
   $('sections').innerHTML=CAT_ORDER.filter(c=>counts[c]).map(c=>{
-    const cards=mods.filter(m=>m.category===c).filter(m=>(active==='all'||active===c)&&(!q||`${m.name} ${m.description||''} ${CATS[m.category]} ${m.status} ${m.projectId||''} ${(m.modrinthCategories||[]).join(' ')}`.toLowerCase().includes(q)));
-    if(!cards.length)return'';visible+=cards.length;
+    const cards=mods
+      .filter(m=>m.category===c)
+      .filter(m=>(active==='all'||active===c)&&(!q||`${m.name} ${m.description||''} ${CATS[m.category]} ${m.status} ${m.projectId||''} ${m.categorySource||''} ${m.categoryConfidence||''} ${(m.modrinthCategories||[]).join(' ')}`.toLowerCase().includes(q)));
+    if(!cards.length)return'';
+    visible+=cards.length;
     return`<section class="category-section"><div class="section-head"><h2>${esc(CATS[c])}</h2><p><span>${cards.length}</span> mods</p></div><div class="grid">${cards.map(card).join('')}</div></section>`;
   }).join('');
-  $('visibleCount').textContent=visible;$('empty').style.display=visible?'none':'block';
+
+  $('visibleCount').textContent=visible;
+  $('empty').style.display=visible?'none':'block';
   document.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{active=ch.dataset.filter;render()});
 }
+
 function card(m){
   const status=m.status==='direct'?'direct':m.status==='local'?'local':'search';
   const desc=String(m.description||'').trim();
   const needsMore=desc.length>118;
   const descHtml=desc?`<small class="desc-short">${esc(shortDescription(desc))}</small>${needsMore?`<small class="desc-full">${esc(desc)}</small><button class="desc-more" type="button" aria-expanded="false">more</button>`:''}`:(m.projectId?`<small>id: ${esc(m.projectId)}</small>`:'');
-  return`<article class="mod-card"><a href="${esc(m.url)}" target="_blank" rel="noopener noreferrer"><div class="mod-top"><span class="category-pill">${esc(CATS[m.category])}</span><span class="status ${status}">${status}</span></div><div><h2>${esc(m.name)}</h2>${descHtml}</div></a></article>`;
+  const source=m.categorySource||'name / filename guess';
+  const confidence=m.categoryConfidence||'low';
+  return`<article class="mod-card" data-mod="${esc(m.normalized)}">
+    <a href="${esc(m.url)}" target="_blank" rel="noopener noreferrer">
+      <div class="mod-top"><span class="category-pill">${esc(CATS[m.category]||m.category)}</span><span class="status ${status}">${status}</span></div>
+      <div><h2>${esc(m.name)}</h2>${descHtml}<div class="sort-meta"><span class="confidence-pill ${esc(confidence)}">${esc(confidence)} confidence</span><span class="confidence-pill">${esc(source)}</span></div></div>
+    </a>
+  </article>`;
 }
+
+function fandomCategory(type){
+  const t=norm(type);
+  if(/exclusive|custom|qsmp/.test(t))return'qsmp';
+  if(/api|library|libreria|lib/.test(t))return'library';
+  if(/optimization|optimisation|optimizacion|performance/.test(t))return'performance';
+  if(/biome|world gen|worldgen|terrain/.test(t))return'worldgen';
+  if(/structure|structures/.test(t))return'worldgen';
+  if(/mob|mobs|creature/.test(t))return'mobs';
+  if(/food|farming/.test(t))return'food';
+  if(/block|blocks|building|bloques/.test(t))return'building';
+  if(/cosmetic|cosmetico|animation|visual/.test(t))return'cosmetic';
+  if(/qol|quality|utility|ui/.test(t))return'qol';
+  if(/item|items|gear|equipment|gameplay/.test(t))return'equipment';
+  return null;
+}
+
+function fandomPageInfo(input){
+  const u=new URL(input);
+  const page=decodeURIComponent(u.pathname.split('/wiki/')[1]||'').split('#')[0].split('?')[0];
+  if(!page)throw new Error('that fandom link does not look like a wiki page.');
+  return {origin:u.origin,page};
+}
+
+function modrinthSlugFromUrl(href){
+  try{
+    const u=new URL(href);
+    if(!/modrinth\.com$/i.test(u.hostname) && !/\.modrinth\.com$/i.test(u.hostname))return '';
+    const parts=u.pathname.split('/').filter(Boolean);
+    const i=parts.indexOf('mod');
+    return i>=0 ? parts[i+1]||'' : '';
+  }catch{return ''}
+}
+
+async function fetchFandomHtml(input){
+  const info=fandomPageInfo(input);
+  const apiUrl=info.origin+'/api.php?action=parse&page='+encodeURIComponent(info.page)+'&prop=text&format=json&origin=*';
+  try{
+    const json=await fetch(apiUrl).then(r=>{if(!r.ok)throw new Error('fandom api '+r.status);return r.json()});
+    const pageHtml=json&&json.parse&&json.parse.text&&json.parse.text['*'];
+    if(pageHtml)return pageHtml;
+  }catch(e){}
+
+  const raw='https://api.allorigins.win/raw?url='+encodeURIComponent(input);
+  return fetch(raw).then(r=>{if(!r.ok)throw new Error('fandom fetch '+r.status);return r.text()});
+}
+
+function parseFandomModsFromHtml(pageHtml){
+  const doc=new DOMParser().parseFromString(pageHtml,'text/html');
+  const rows=[];
+  for(const table of [...doc.querySelectorAll('table')]){
+    const headerCells=[...table.querySelectorAll('tr:first-child th, tr:first-child td')].map(x=>norm(x.textContent));
+    const headerText=headerCells.join(' ');
+    if(!/mod name|nombre|type of mod|tipo|version/.test(headerText))continue;
+
+    const nameIndex=headerCells.findIndex(h=>/mod name|nombre/.test(h));
+    const typeIndex=headerCells.findIndex(h=>/type|tipo/.test(h));
+    const versionIndex=headerCells.findIndex(h=>/version/.test(h));
+
+    table.querySelectorAll('tr').forEach((tr,idx)=>{
+      if(idx===0)return;
+      const cells=[...tr.children].filter(el=>el.matches('td,th'));
+      if(cells.length<2)return;
+
+      const nameCell=cells[nameIndex>=0?nameIndex:1]||cells[1]||cells[0];
+      const typeCell=cells[typeIndex>=0?typeIndex:2]||null;
+      const versionCell=cells[versionIndex>=0?versionIndex:3]||null;
+
+      const name=(nameCell&&nameCell.textContent||'').replace(/\s+/g,' ').trim();
+      if(!name || /^mod name$/i.test(name))return;
+
+      const type=(typeCell&&typeCell.textContent||'').replace(/\s+/g,' ').trim();
+      const version=(versionCell&&versionCell.textContent||'').replace(/\s+/g,' ').trim();
+      const modrinthAnchor=[...tr.querySelectorAll('a[href]')].find(a=>/modrinth\.com\/mod\//i.test(a.href));
+      const slug=modrinthAnchor?modrinthSlugFromUrl(modrinthAnchor.href):'';
+      const category=fandomCategory(type);
+
+      rows.push({
+        name,
+        slug,
+        url:slug?'https://modrinth.com/mod/'+slug:'',
+        status:slug?'direct':'search',
+        category,
+        categorySource:category?'fandom type column':'fandom table row',
+        categoryConfidence:category?'medium':'low',
+        description:[type,version].filter(Boolean).join(' • '),
+        fandomType:type,
+        version,
+        matched:slug?'fandom modrinth link':'fandom table row'
+      });
+    });
+  }
+  return rows;
+}
+
+async function batchHydrateModrinthSlugs(items){
+  const slugs=[...new Set(items.map(x=>x.slug).filter(Boolean))];
+  if(!slugs.length)return items;
+  for(let i=0;i<slugs.length;i+=100){
+    const chunk=slugs.slice(i,i+100);
+    try{
+      const projects=await api('projects?ids='+encodeURIComponent(JSON.stringify(chunk)));
+      const bySlug=Object.fromEntries(projects.map(p=>[p.slug,p]));
+      const byId=Object.fromEntries(projects.map(p=>[p.id,p]));
+      items.forEach(item=>{
+        const p=bySlug[item.slug]||byId[item.slug];
+        if(!p)return;
+        const decision=categoryFromModrinthProject(p)||decideByRules((p.title||'')+' '+(p.description||''),'modrinth project page description')||chooseCategory({name:p.title,description:p.description});
+        item.name=p.title||item.name;
+        item.slug=p.slug;
+        item.url='https://modrinth.com/mod/'+p.slug;
+        item.status='direct';
+        item.description=p.description||item.description||'';
+        item.modrinthCategories=[...(p.categories||[]),...(p.additional_categories||[])];
+        item.category=decision.category;
+        item.categorySource='fandom link + modrinth project page';
+        item.categoryConfidence='high';
+        item.matched='fandom row matched modrinth page: '+p.title;
+      });
+    }catch(e){}
+  }
+  return items;
+}
+
+async function loadFandomMods(input){
+  const pageHtml=await fetchFandomHtml(input);
+  let list=parseFandomModsFromHtml(pageHtml);
+  if(!list.length)throw new Error('i could not find a mod table on that fandom page.');
+  list=await batchHydrateModrinthSlugs(list);
+  return list;
+}
+
 async function api(path){const r=await fetch(`https://api.modrinth.com/v2/${path}`);if(!r.ok)throw new Error(`modrinth api ${r.status}`);return r.json()}
 function slugFromInput(v){v=v.trim();try{const u=new URL(v);return u.pathname.split('/').filter(Boolean).pop()}catch{return v.replace(/^modpack\//,'')}}
 async function loadPack(){
   try{
+    const input=$('packInput').value.trim();
+    if(!input)throw new Error('paste a link or slug first.');
+
+    if(/fandom\.com\/wiki\//i.test(input)){
+      $('packStatus').textContent='reading fandom page...';
+      setPackInfo({
+        title:'fandom mod list',
+        description:'imported from a fandom wiki table. modrinth links are upgraded with project page data when available.'
+      });
+      const list=await loadFandomMods(input);
+      setMods(list,'loaded '+list.length+' mods from fandom.');
+      $('packStatus').textContent='loaded fandom page: '+list.length+' mods';
+      return;
+    }
+
     $('packStatus').textContent='loading pack...';
-    const id=slugFromInput($('packInput').value); if(!id)throw new Error('paste a link or slug first.');
-    const project=await api(`project/${encodeURIComponent(id)}`); if(project.project_type!=='modpack')throw new Error('that is not a modpack.'); setPackInfo(project);
-    const versions=await api(`project/${project.id}/version`); if(!versions.length)throw new Error('no versions found.');
-    const file=(versions[0].files||[]).find(f=>f.filename&&f.filename.endsWith('.mrpack'))||(versions[0].files||[]).find(f=>f.primary)||versions[0].files?.[0]; if(!file?.url)throw new Error('no .mrpack download found.');
+    const id=slugFromInput(input);
+    const project=await api('project/'+encodeURIComponent(id));
+    if(project.project_type!=='modpack')throw new Error('that is not a modpack.');
+    setPackInfo(project);
+    const versions=await api('project/'+project.id+'/version');
+    if(!versions.length)throw new Error('no versions found.');
+    const file=(versions[0].files||[]).find(f=>f.filename&&f.filename.endsWith('.mrpack'))||(versions[0].files||[]).find(f=>f.primary)||versions[0].files?.[0];
+    if(!file?.url)throw new Error('no .mrpack download found.');
     const blob=await fetch(file.url).then(r=>{if(!r.ok)throw new Error('download failed.');return r.blob()});
     const list=await parseMrpack(blob);
-    setMods(list,`loaded ${list.length} mods from ${project.title}.`);
-    $('packStatus').textContent=`loaded latest version: ${versions[0].name}`;
-  }catch(e){$('packStatus').textContent=`nope: ${e.message}`;$('status').textContent=`modrinth load failed: ${e.message}`}
+    setMods(list,'loaded '+list.length+' mods from '+project.title+'.');
+    $('packStatus').textContent='loaded latest version: '+versions[0].name;
+  }catch(e){
+    $('packStatus').textContent='nope: '+e.message;
+    $('status').textContent='load failed: '+e.message;
+  }
 }
 async function parseMrpack(blob){
   if(!window.JSZip)throw new Error('jszip did not load. open this file with internet access, or upload/paste a raw list instead.');
@@ -615,7 +985,20 @@ async function parseMrpack(blob){
   const unique=[...new Set(ids)],items=[];
   for(let i=0;i<unique.length;i+=100){
     const chunk=unique.slice(i,i+100);
-    try{(await api(`projects?ids=${encodeURIComponent(JSON.stringify(chunk))}`)).forEach(p=>items.push({name:p.title,slug:p.slug,status:'direct',category:categoryFromModrinthProject(p)||cat(p.title),modrinthCategories:p.categories||[],description:p.description||''}))}
+    try{(await api(`projects?ids=${encodeURIComponent(JSON.stringify(chunk))}`)).forEach(p=>{
+      const decision=categoryFromModrinthProject(p)||{};
+      items.push({
+        name:p.title,
+        slug:p.slug,
+        status:'direct',
+        category:decision.category,
+        categorySource:decision.categorySource,
+        categoryConfidence:decision.categoryConfidence,
+        matched:decision.matched,
+        modrinthCategories:[...(p.categories||[]),...(p.additional_categories||[])],
+        description:p.description||''
+      })
+    })}
     catch{chunk.forEach(id=>items.push({name:id,projectId:id,status:'search'}))}
   }
   return items.concat(fallback);
@@ -660,7 +1043,7 @@ function raw(){
 function clearAll(){mods=[];active='all';currentPack=null;$('rawInput').value='';$('packInput').value='';$('searchInput').value='';$('exportBtn').disabled=true;$('status').textContent='cleared.';setPackInfo(null);render()}
 function sample(){setPackInfo(null);setMods(["Create","Farmer's Delight","YUNG's API","ModernFix","Waystones","Macaw's Furniture","Simple Voice Chat","Terralith","Entity Model Features"].map(name=>({name,status:"search"})),"loaded tiny sample.")}
 function exportHtml(){
-  const payload = JSON.stringify(mods.map(({name,category,status,url,projectId,slug,modrinthCategories,description}) => ({name,category,status,url,projectId,slug,modrinthCategories,description})));
+  const payload = JSON.stringify(mods.map(({name,category,status,url,projectId,slug,modrinthCategories,description,categorySource,categoryConfidence,matched,source}) => ({name,category,status,url,projectId,slug,modrinthCategories,description,categorySource,categoryConfidence,matched,source})));
   let doc = '<!doctype html>\\n' + document.documentElement.outerHTML;
   doc = doc.replace("let mods=[],active='all',currentPack=null;", `let mods=${payload},active='all';`);
   doc = doc.replace('render();\\n' + '</scr' + 'ipt>', 'if(currentPack)setPackInfo(currentPack);render();document.getElementById("builderPanel").style.display="none";document.getElementById("exportBtn").disabled=false;\\n' + '</scr' + 'ipt>');
@@ -682,6 +1065,7 @@ document.addEventListener('click', e=>{
   btn.textContent=expanded?'less':'more';
   btn.setAttribute('aria-expanded',String(expanded));
 });
+
 
 
 const ASCII_CHARS=' .,:;-=+*#%@';
